@@ -1,18 +1,18 @@
 import pathlib
-import uuid
 import time
+import uuid
+from typing import Dict, Any, Union, List
 from typing import Optional
 
+import tqdm
 from pydub import AudioSegment
 
-from typing import Dict, Any, Union
-
+from .converter import Converter, Geo
+from .enums import GenreMusic
 from .misc import Request
 from .misc import ShazamUrl
 from .schemas.artists import ArtistQuery
 from .signature import DecodedMessage
-from .enums import GenreMusic
-from .converter import Converter, Geo
 from .typehints import CountryCode
 from .utils import ArtistQueryGenerator
 from .utils import get_song
@@ -50,7 +50,7 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def artist_about(
-        self, artist_id: int, query: Optional[ArtistQuery] = None
+            self, artist_id: int, query: Optional[ArtistQuery] = None
     ) -> Dict[str, Any]:
         """
         Retrieving information from an artist profile
@@ -96,10 +96,10 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def top_country_tracks(
-        self,
-        country_code: Union[CountryCode, str],
-        limit: int = 200,
-        offset: int = 0,
+            self,
+            country_code: Union[CountryCode, str],
+            limit: int = 200,
+            offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Get the best tracks by country code
@@ -126,11 +126,11 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def top_city_tracks(
-        self,
-        country_code: Union[CountryCode, str],
-        city_name: str,
-        limit: int = 200,
-        offset: int = 0,
+            self,
+            country_code: Union[CountryCode, str],
+            city_name: str,
+            limit: int = 200,
+            offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Retrieving information from an artist profile
@@ -160,10 +160,10 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def top_world_genre_tracks(
-        self,
-        genre: Union[GenreMusic, int],
-        limit: int = 100,
-        offset: int = 0,
+            self,
+            genre: Union[GenreMusic, int],
+            limit: int = 100,
+            offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Get world tracks by certain genre
@@ -197,11 +197,11 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def top_country_genre_tracks(
-        self,
-        country_code: str,
-        genre: Union[GenreMusic, int],
-        limit: int = 200,
-        offset: int = 0,
+            self,
+            country_code: str,
+            genre: Union[GenreMusic, int],
+            limit: int = 200,
+            offset: int = 0,
     ) -> Dict[str, Any]:
         """
         The best tracks by a genre in the country
@@ -235,10 +235,10 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def related_tracks(
-        self,
-        track_id: int,
-        limit: int = 20,
-        offset: int = 0,
+            self,
+            track_id: int,
+            limit: int = 20,
+            offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Similar songs based song id
@@ -265,10 +265,10 @@ class Shazam(Converter, Geo, Request):
         )
 
     async def search_artist(
-        self,
-        query: str,
-        limit: int = 10,
-        offset: int = 0,
+            self,
+            query: str,
+            limit: int = 10,
+            offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Search all artists by prefix or fullname
@@ -336,7 +336,7 @@ class Shazam(Converter, Geo, Request):
         return await self.request("GET", link, headers=self.headers())
 
     async def recognize_song(
-        self, data: Union[str, pathlib.Path, bytes, bytearray, AudioSegment]
+            self, data: Union[str, pathlib.Path, bytes, bytearray, AudioSegment]
     ) -> Dict[str, Any]:
         """
         Creating a song signature based on a file and searching for this signature in the shazam
@@ -355,6 +355,37 @@ class Shazam(Converter, Geo, Request):
         while not signature:
             signature = signature_generator.get_next_signature()
         results = await self.send_recognize_request(signature)
+        return results
+
+    async def recognize_songs(self, data: Union[str, pathlib.Path, bytes, bytearray, AudioSegment]) -> List[
+        Dict[str, Any]]:
+        """
+        Creating multiple song signatures based on a file and then mapping them to Shazan.
+        Answers questions like "Where did this hella amazing sounding remix come from?"
+
+        :param data: Path to song file or bytes
+        :return: A list of dicts about the songs that were found.
+            Maybe some kind of validation can be done on it?
+        """
+        song = await get_song(data=data)
+        audio = self.normalize_audio_data(song)
+        signature_generator = self.create_signature_generator(audio)
+        signatures = [signature_generator.get_next_signature()]
+
+        while len(signature_generator.input_pending_processing) < 128:
+            latest_signature = signatures[-1]
+            while not latest_signature:
+                latest_signature = signature_generator.get_next_signature()
+            signatures.append(latest_signature)
+
+        print(f"Number of signatures found: {len(signatures)}")
+
+        results = []
+        for signature in tqdm.tqdm(
+            signatures, total=len(signatures), desc=f"Querying shazam for {len(signatures)}..."
+        ):
+            next_result = await self.send_recognize_request(signature)
+            results.append(next_result)
         return results
 
     async def send_recognize_request(self, sig: DecodedMessage) -> Dict[str, Any]:
